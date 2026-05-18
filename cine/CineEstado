@@ -1,0 +1,137 @@
+package cine;
+
+import java.lang.Thread;
+import java.awt.Color;
+import java.util.Random;
+
+public class CineEstado {
+
+    // Estado compartido (accesible desde CineGUI)
+    static final Integer[] asientos = new Integer[20];
+    static final Object lock = new Object();
+    static int sinAsientoCount = 0;
+
+    // Hilo de cada usuario
+    static class UsuarioThread extends Thread {
+        
+        //Identificador de cada usuario
+        private final int id;
+
+        //Crea un nuevo hilo de usuario con el ID indicado
+        public UsuarioThread(int id) {
+            super("Usuario-" + id);
+            this.id = id;
+        }
+
+        @Override
+        public void run() {
+            Random random = new Random(); 
+            int intentos = 0;
+
+            while (true) {
+                intentos++;
+                int asientoDeseado = random.nextInt(20); //Elige un asiento aleatorio
+
+                synchronized (lock) {
+                    //Cuenta los asientos disponibles antes de actuar
+                    int libres = 0;
+                    for (Integer a : asientos) {
+                        if (a == null) libres++;
+                    }
+                    
+                    //Si no hay ningun asiento libre, el usuario se queda sin lugar
+                    if (libres == 0) {
+                        sinAsientoCount++;
+                        CineGUI.log("Usuario " + id + " sin asiento. Sala llena.");
+                        CineGUI.actualizarSinAsiento();
+                        break;
+                    }
+                    // Si el asiento deseado esta libre, lo reserva
+                    if (asientos[asientoDeseado] == null) {
+                        asientos[asientoDeseado] = id;
+                        CineGUI.log("Usuario " + id + " → Asiento " +
+                                (asientoDeseado + 1) + " (intento #" + intentos + ")");
+                        CineGUI.pintarAsiento(asientoDeseado, "U" + id, new Color(255, 182, 193));
+                        break;
+                    } else {
+                        // El asiento ya fue tomado por otro usuario; se reintentara
+                        CineGUI.log("Usuario " + id + " intentó asiento " +
+                                (asientoDeseado + 1) + ", ocupado.");
+                    }
+                }
+                // Espera entre 100 y 300 ms antes del siguiente intento
+                try {
+                    Thread.sleep(100 + random.nextInt(200));
+                } catch (InterruptedException e) {
+                    // Si el hilo es interrumpido externamente, restaura la bandera
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+
+    // Hilo coordinador: lanza y espera a todos
+    static class SimulacionThread extends Thread {
+
+        // Inicializa el hilo coordinador con un nombre descriptivo
+        public SimulacionThread() {
+            super("Simulacion-Coordinador");
+        }
+        
+        // Lanza 25 hilos de usuario de forma concurrente, espera a que todos terminen.
+        @Override
+        public void run() {
+            int numUsuarios = 25;
+            UsuarioThread[] usuarios = new UsuarioThread[numUsuarios];
+
+            // Crea e inicia cada hilo de usuario
+            for (int i = 0; i < numUsuarios; i++) {
+                usuarios[i] = new UsuarioThread(i + 1);
+                usuarios[i].start();
+            }
+            
+            //Espera a que todos los usuarios terminen su proceso
+            for (UsuarioThread u : usuarios) {
+                try {
+                    u.join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            
+            // Mustra los resultados globales al finalizar la simulacion
+            CineGUI.log("\n--- Simulación terminada ---");
+            CineGUI.log("Total sin asiento: " + sinAsientoCount);
+            CineGUI.mostrarResumen();
+        }
+    }
+
+    // Hilo de compra manual (clic en un asiento)
+    static class CompraManualThread extends Thread {
+        
+        // Indice del asiento seleccionado por el usuario en la GUI
+        private final int idx;
+
+        // Crea el hilo de compra manual para el asiento indicado
+        public CompraManualThread(int idx) {
+            super("CompraManual-" + (idx + 1));
+            this.idx = idx;
+        }
+
+        @Override
+        public void run() {
+            synchronized (lock) {
+                if (asientos[idx] == null) {
+                    // Reserva el asiento con un ID 99 para distinguirlo de los automaticos
+                    asientos[idx] = 99;
+                    CineGUI.log("Compra MANUAL del asiento " + (idx + 1));
+                    // Pinta el asiento en celeste para diferenciar la compra manual
+                    CineGUI.pintarAsiento(idx, "TÚ", new Color(135, 206, 250));
+                } else {
+                    CineGUI.log("Asiento " + (idx + 1) + " ya ocupado por U" + asientos[idx]);
+                }
+            }
+        }
+    }
+}
